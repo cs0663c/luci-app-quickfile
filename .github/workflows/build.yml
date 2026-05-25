@@ -80,15 +80,15 @@ jobs:
           IPK="quickfile_${PKG_VER}_${ARCH}.ipk"
           ar r "$BUILD_DIR/$IPK" "$BUILD_DIR/debian-binary" "$BUILD_DIR/control.tar.gz" "$BUILD_DIR/data.tar.gz"
 
-          mkdir -p output
-          cp "$BUILD_DIR/$IPK" output/
-          echo "Built: $IPK ($(du -h output/$IPK | cut -f1))"
+          mkdir -p "$GITHUB_WORKSPACE/output"
+          cp "$BUILD_DIR/$IPK" "$GITHUB_WORKSPACE/output/"
+          echo "Built: $IPK ($(du -h "$GITHUB_WORKSPACE/output/$IPK" | cut -f1))"
 
       - name: Upload quickfile artifact
         uses: actions/upload-artifact@v4
         with:
           name: quickfile-${{ matrix.arch.name }}
-          path: output/*.ipk
+          path: ${{ github.workspace }}/output/*.ipk
 
   build-luci:
     runs-on: ubuntu-latest
@@ -131,15 +131,15 @@ jobs:
           IPK="${PKG_NAME}_${PKG_VER}_all.ipk"
           ar r "$BUILD_DIR/$IPK" "$BUILD_DIR/debian-binary" "$BUILD_DIR/control.tar.gz" "$BUILD_DIR/data.tar.gz"
 
-          mkdir -p output
-          cp "$BUILD_DIR/$IPK" output/
-          echo "Built: $IPK ($(du -h output/$IPK | cut -f1))"
+          mkdir -p "$GITHUB_WORKSPACE/output"
+          cp "$BUILD_DIR/$IPK" "$GITHUB_WORKSPACE/output/"
+          echo "Built: $IPK ($(du -h "$GITHUB_WORKSPACE/output/$IPK" | cut -f1))"
 
       - name: Upload luci-app artifact
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-quickfile
-          path: output/*.ipk
+          path: ${{ github.workspace }}/output/*.ipk
 
   release:
     needs: [build, build-luci]
@@ -154,7 +154,7 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release
-          find artifacts -name "*.ipk" -exec cp {} release/ \;
+          find artifacts -name "*.ipk" -exec cp {} release/ \; 2>/dev/null || true
           ls -lh release/
 
       - name: Create Release
