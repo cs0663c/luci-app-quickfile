@@ -77,14 +77,14 @@ jobs:
           PEOF
           chmod 755 "$BUILD_DIR/control/postinst"
 
-          # Pack
-          echo "2.0" > "$BUILD_DIR/debian-binary"
-          cd "$BUILD_DIR/control" && tar czf ../control.tar.gz . && cd ..
-          cd "$BUILD_DIR/data" && tar czf ../data.tar.gz . && cd ..
+          # Pack — use explicit file listing to avoid ./ prefix in tar entries
+          printf '2.0\n' > "$BUILD_DIR/debian-binary"
+          tar czf "$BUILD_DIR/control.tar.gz" -C "$BUILD_DIR/control" control conffiles postinst
+          tar czf "$BUILD_DIR/data.tar.gz" -C "$BUILD_DIR/data" etc usr
 
           # Create ar archive
           IPK="quickfile_${PKG_VER}_${ARCH}.ipk"
-          ar r "$BUILD_DIR/$IPK" "$BUILD_DIR/debian-binary" "$BUILD_DIR/control.tar.gz" "$BUILD_DIR/data.tar.gz"
+          ar rc "$BUILD_DIR/$IPK" "$BUILD_DIR/debian-binary" "$BUILD_DIR/control.tar.gz" "$BUILD_DIR/data.tar.gz"
 
           mkdir -p "$GITHUB_WORKSPACE/output"
           cp "$BUILD_DIR/$IPK" "$GITHUB_WORKSPACE/output/"
@@ -130,12 +130,12 @@ jobs:
           Description: LuCI File Manager module
           EOF
 
-          echo "2.0" > "$BUILD_DIR/debian-binary"
-          cd "$BUILD_DIR/control" && tar czf ../control.tar.gz . && cd ..
-          cd "$BUILD_DIR/data" && tar czf ../data.tar.gz . && cd ..
+          printf '2.0\n' > "$BUILD_DIR/debian-binary"
+          tar czf "$BUILD_DIR/control.tar.gz" -C "$BUILD_DIR/control" control
+          tar czf "$BUILD_DIR/data.tar.gz" -C "$BUILD_DIR/data" usr www
 
           IPK="${PKG_NAME}_${PKG_VER}_all.ipk"
-          ar r "$BUILD_DIR/$IPK" "$BUILD_DIR/debian-binary" "$BUILD_DIR/control.tar.gz" "$BUILD_DIR/data.tar.gz"
+          ar rc "$BUILD_DIR/$IPK" "$BUILD_DIR/debian-binary" "$BUILD_DIR/control.tar.gz" "$BUILD_DIR/data.tar.gz"
 
           mkdir -p "$GITHUB_WORKSPACE/output"
           cp "$BUILD_DIR/$IPK" "$GITHUB_WORKSPACE/output/"
