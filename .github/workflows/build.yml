@@ -1,0 +1,166 @@
+name: Build OpenWrt IPK
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch:
+          - { name: arm_cortex-a5_vfpv4, file: arm }
+          - { name: aarch64_cortex-a53, file: aarch64 }
+          - { name: x86_64, file: x86_64 }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download quickfile source
+        run: |
+          curl -sL "https://r2.cooluc.com/source/quickfile-1.0.16.tar.gz" -o /tmp/quickfile-src.tar.gz
+          tar xzf /tmp/quickfile-src.tar.gz -C /tmp/
+
+      - name: Build quickfile IPK (${{ matrix.arch.name }})
+        run: |
+          PKG_NAME="quickfile"
+          PKG_VER="1.0.16-1"
+          ARCH="${{ matrix.arch.name }}"
+          BIN="${{ matrix.arch.file }}"
+          BUILD_DIR="/tmp/ipk-build/$PKG_NAME-$ARCH"
+
+          # Create directories
+          mkdir -p "$BUILD_DIR/data/usr/bin"
+          mkdir -p "$BUILD_DIR/data/etc/init.d"
+          mkdir -p "$BUILD_DIR/data/etc/nginx/conf.d"
+          mkdir -p "$BUILD_DIR/control"
+
+          # Copy files
+          cp "/tmp/quickfile-1.0.16/quickfile.$BIN" "$BUILD_DIR/data/usr/bin/quickfile"
+          chmod 755 "$BUILD_DIR/data/usr/bin/quickfile"
+          cp quickfile/files/quickfile.init "$BUILD_DIR/data/etc/init.d/quickfile"
+          cp quickfile/files/quickfile.locations "$BUILD_DIR/data/etc/nginx/conf.d/quickfile.locations"
+
+          # Control files
+          cat > "$BUILD_DIR/control/control" << EOF
+          Package: $PKG_NAME
+          Version: $PKG_VER
+          Depends: libc, libssp, librt, libpthread
+          Section: net
+          Architecture: $ARCH
+          Maintainer: sbwml <admin@cooluc.com>
+          Description: Quick File Manager
+           Lightweight web-based file manager for OpenWrt/LuCI with minimal resource usage.
+          EOF
+
+          echo "/etc/nginx/conf.d/quickfile.locations" > "$BUILD_DIR/control/conffiles"
+
+          cat > "$BUILD_DIR/control/postinst" << 'PEOF'
+          #!/bin/sh
+          [ "${IPKG_INSTROOT}" ] || {
+            /etc/init.d/quickfile enable
+            /etc/init.d/quickfile restart
+          }
+          exit 0
+          PEOF
+          chmod 755 "$BUILD_DIR/control/postinst"
+
+          # Pack
+          echo "2.0" > "$BUILD_DIR/debian-binary"
+          cd "$BUILD_DIR/control" && tar czf ../control.tar.gz . && cd ..
+          cd "$BUILD_DIR/data" && tar czf ../data.tar.gz . && cd ..
+
+          # Create ar archive
+          IPK="quickfile_${PKG_VER}_${ARCH}.ipk"
+          ar r "$BUILD_DIR/$IPK" "$BUILD_DIR/debian-binary" "$BUILD_DIR/control.tar.gz" "$BUILD_DIR/data.tar.gz"
+
+          mkdir -p output
+          cp "$BUILD_DIR/$IPK" output/
+          echo "Built: $IPK ($(du -h output/$IPK | cut -f1))"
+
+      - name: Upload quickfile artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickfile-${{ matrix.arch.name }}
+          path: output/*.ipk
+
+  build-luci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build luci-app-quickfile IPK
+        run: |
+          PKG_NAME="luci-app-quickfile"
+          PKG_VER="1.0.0-1"
+          BUILD_DIR="/tmp/ipk-build/$PKG_NAME"
+
+          mkdir -p "$BUILD_DIR/data/www/luci-static/resources/view/system"
+          mkdir -p "$BUILD_DIR/data/usr/share/luci/menu.d"
+          mkdir -p "$BUILD_DIR/data/usr/share/rpcd/acl.d"
+          mkdir -p "$BUILD_DIR/control"
+
+          cp luci-app-quickfile/htdocs/luci-static/resources/view/system/quickfile.js \
+            "$BUILD_DIR/data/www/luci-static/resources/view/system/"
+          cp luci-app-quickfile/root/usr/share/luci/menu.d/luci-app-quickfile.json \
+            "$BUILD_DIR/data/usr/share/luci/menu.d/"
+          cp luci-app-quickfile/root/usr/share/rpcd/acl.d/luci-app-quickfile.json \
+            "$BUILD_DIR/data/usr/share/rpcd/acl.d/"
+
+          cat > "$BUILD_DIR/control/control" << EOF
+          Package: $PKG_NAME
+          Version: $PKG_VER
+          Depends: +luci-nginx +quickfile
+          Section: luci
+          Architecture: all
+          Maintainer: sbwml <admin@cooluc.com>
+          Description: LuCI File Manager module
+          EOF
+
+          echo "2.0" > "$BUILD_DIR/debian-binary"
+          cd "$BUILD_DIR/control" && tar czf ../control.tar.gz . && cd ..
+          cd "$BUILD_DIR/data" && tar czf ../data.tar.gz . && cd ..
+
+          IPK="${PKG_NAME}_${PKG_VER}_all.ipk"
+          ar r "$BUILD_DIR/$IPK" "$BUILD_DIR/debian-binary" "$BUILD_DIR/control.tar.gz" "$BUILD_DIR/data.tar.gz"
+
+          mkdir -p output
+          cp "$BUILD_DIR/$IPK" output/
+          echo "Built: $IPK ($(du -h output/$IPK | cut -f1))"
+
+      - name: Upload luci-app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-quickfile
+          path: output/*.ipk
+
+  release:
+    needs: [build, build-luci]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release
+          find artifacts -name "*.ipk" -exec cp {} release/ \;
+          ls -lh release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.ipk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
